@@ -43,6 +43,9 @@ setInterval(function() {
         var query = 'SELECT * from ABCD '+Math.random();
         var node = clientAvailable.getNode(query)
         node.emit('data',query);
+        var ord = clientAvailable.getNodeOrder();
+        console.log('ring order');
+        for(let i=0; i<clientList.size; i++) console.log(ord[i].id);
     }
     },1000
 );

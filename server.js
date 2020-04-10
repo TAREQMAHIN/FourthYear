@@ -74,6 +74,9 @@ function startServer(port) {
          */ 
         socket.on("query", (query) => {
             var secondaryClient = sClientAvailable.getNode(query)
+            // left and right nodes of main node.
+            // var leftSecondaryCLient = ConsistentHashing.getLeftNode(secondaryClient);
+            // var rightSecondaryCLient = ConsistentHashing.getRightNode(secondaryClient);
             queryPClient.set(query,socket);
             querySClient.set(query,socket);
             secondaryClient.emit('process',query);
@@ -107,8 +110,12 @@ function startServer(port) {
     });
 }
 
+// start the server at specified port
 startServer(8003);
+console.log("server started at http://127.0.0.1:8003");
 
+// Dummy function to send query to clients
+// Not required now since primary client sends query is implemented
 // setInterval(function() {
 //     if(sClientList.size > 0) {
 //         var query = 'SELECT * from ABCD '+Math.random();

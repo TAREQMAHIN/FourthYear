@@ -40,7 +40,8 @@ var name = "secondary-client "+(Math.floor(Math.random()*100)).toString()
  */
 function process(query) {
     if(query.type==0){
-        //process oltp query as it is and record answer in res
+        //this must be synchronous
+        //process oltp query as it is and record answer in res i.e call eval function
         ioClient.emit('processed', query, res);
     }
     else

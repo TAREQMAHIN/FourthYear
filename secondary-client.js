@@ -60,3 +60,68 @@ ioClient.on("process", (query) => {
     query_queue.push(query);
     process_query();
 });
+
+ioClient.on('transferItems', (options)=>
+{
+    var opts = JSON.parse(options);
+
+    var itemsToSend = {};
+
+    opts.items.forEach((itemName)=>
+    {
+        itemsToSend[itemName] = ownItems[itemName]; //assume ownItems contains data of current node
+    })
+
+    if(opts.direction == 'right')
+    {
+        rightNeighbour.emit("addMyFiles", JSON.stringify(itemsToSend)); // assume rightNeighbour variable contains the socket of right neighbour
+    }
+    else
+    {
+        leftNeighbour.emit("addMyFiles", JSON.stringify(itemsToSend)); // assume leftNeighbour variable contains the socket of left neighbour
+    }
+})
+
+ioClient.on('mergeData', (direction)=>
+{
+    if(direction=='right')
+    {
+        rightNeighbour.emit("addMyFiles", JSON.stringify(ownItems)); //rightNeighbour must be updated before this point
+        leftNeighbour.emit("addMyFiles", JSON.stringify(rightItems));
+
+        //merge right
+        Object.keys(rightItems).forEach((key)=>
+        {
+            ownItems[key] = rightItems[key];
+        })
+
+        rightItems = {};
+
+        rightNeighbour.emit("sendYourFiles", "");
+    }
+    else
+    {
+        leftNeighbour.emit("addMyFiles", JSON.stringify(ownItems)); //leftNeighbour must be updated before this point
+        rightNeighbour.emit("addMyFiles", JSON.stringify(leftItems))
+
+        //merge left
+        Object.keys(leftItems).forEach((key)=>
+        {
+            ownItems[key] = leftItems[key];
+        })
+
+        leftItems = {};
+
+        leftNeighbour.emit("sendYourFiles", "");
+    }
+})
+
+rightNeighbour.on("sendYourFiles", ()=>
+{
+    rightNeighbour.emit("addMyFiles", JSON.stringify(ownItems));
+})
+
+leftNeighbour.on("sendYourFiles", ()=>
+{
+    leftNeighbour.emit("addMyFiles", JSON.stringify(ownItems));
+})

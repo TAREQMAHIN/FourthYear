@@ -102,12 +102,60 @@ function startServer(port) {
                 pClientList.delete(socket.id);
             }
             else if(sClientList.get(socket.id)) {
+
+                updateNeighbourAddresses(socket);
+                //this function needs to be implemented
+
+                shuffleOnRemoval(socket);
+
                 sClientList.delete(socket.id);
                 sClientAvailable.removeNode(socket);
             }
             console.info(`Client gone [id=${socket.id}]`);
         });
     });
+}
+
+
+shuffleOnAddition(socket)
+{
+    var left = ConsistentHashing.getLeftNode(socket);
+
+    var leftItems = getNodeItemsList(left); 
+    // this function needs to be implemented to get list of items in a node
+
+    var itemsToMove = [];
+
+    leftItems.forEach((item)=>{
+        if(ConsistentHashing.getNode(item)==socket)
+            itemsToMove.push(item);
+    })
+
+    transferItems(itemsToMove, left, 'right');
+    // transferItems(items, node, direction)
+    // this will signal 'node' to transfer ownership of 'items' to the node to 'left/right'
+}
+
+transferItems(items, node, direction)
+{
+    node.emit('transferItems', JSON.stringify({direction: direction, items: items}));
+}
+
+shuffleOnRemoval(socket)
+{
+    var left = ConsistentHashing.getLeftNode(socket);
+    var right = ConsistentHashing.getRightNode(socket);
+
+    mergeData(left, 'right');
+    // mergeData(node, direction)
+    // this will signal 'node' to merge with itself the data of 'right/left' that it contained
+    // and then send the merged data (extra) to the opposite direction for replication
+    // it will also then request the new data
+}
+
+mergeData(node, direction)
+{
+    node.emit('mergeData', direction);
 }
 
 // start the server at specified port

@@ -23,6 +23,10 @@ var query_queue = new Array();
 var olap_queue = new Array();
 var dict =new Array();
 
+
+//datastructure for storage
+
+
 // function to get current date and time
 function getDateTime() {
     var date = new Date().toJSON().slice(0,10);
@@ -50,7 +54,7 @@ function process(query) {
             olap_queue.push(query);
         }
         else{
-                const forked = fork('node_base.js');
+                const forked = fork('olap.js');
                 forked.send({ dict : dict});
 
             }

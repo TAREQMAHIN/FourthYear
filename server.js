@@ -1,4 +1,8 @@
 
+// to create unique random string
+var crypto = require('crypto');
+
+
 /***
  * Secondary Clients 
  * 
@@ -59,11 +63,16 @@ function startServer(port) {
     
         // primary client can opt to work as secondary client
         socket.on("changeClientType", (key) => {
-            if(key == "12345678") {
+            if(key == "12345678" && pClientList.has(socket.id)) {
                 pClientList.delete(socket.id);
                 sClientList.set(socket.id, socket);
                 sClientAvailable.addNode(socket);
+
+                socket.emit('clientTypeChange','success');
             }
+            socket.emit('clientTypeChange','failed');
+            console.log('No of Users : '+pClientList.size);
+            console.log('No of Nodes : '+sClientList.size);
         });
 
         /***
@@ -73,13 +82,18 @@ function startServer(port) {
          * return the received result to primary client
          */ 
         socket.on("query", (query) => {
-            var secondaryClient = sClientAvailable.getNode(query)
+            console.log('Incoming query : '+ query.hash);
+            console.log('Received from user : '+socket.request.connection.remoteAddress);
+
+            let secondaryClient = sClientAvailable.getNode(query.hash);
+            console.log('Forwarded to node : '+secondaryClient.request.connection.remoteAddress);
+            console.log('\n');
             // left and right nodes of main node.
             // var leftSecondaryCLient = ConsistentHashing.getLeftNode(secondaryClient);
             // var rightSecondaryCLient = ConsistentHashing.getRightNode(secondaryClient);
-            queryPClient.set(query,socket);
-            querySClient.set(query,socket);
-            secondaryClient.emit('process',query);
+            queryPClient.set(query.hash,socket);
+            querySClient.set(query.hash,socket);
+            secondaryClient.emit('process',query,1);
         });
 
         /***
@@ -90,7 +104,7 @@ function startServer(port) {
          * i.e. queryPClient and querySClient
          */
         socket.on("processed", (query, result) => {
-            var sendToClient = queryPClient.get(query);
+            var sendToClient = queryPClient.get(query.hash);
             sendToClient.emit("result",query,result);
             queryPClient.delete(sendToClient);
             querySClient.delete(socket);

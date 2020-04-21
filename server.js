@@ -1,4 +1,8 @@
 
+// to create unique random string
+var crypto = require('crypto');
+
+
 /***
  * Secondary Clients 
  * 
@@ -14,6 +18,7 @@
  */ 
 
 var ConsistentHashing = require('consistent-hashing');
+
 var sClientAvailable = new ConsistentHashing(['node1']);
 sClientList = new Map()
 sClientAvailable.removeNode('node1');
@@ -40,6 +45,7 @@ var queryPClient = new Map();
 var querySClient = new Map();
 
 
+var queueAddition = new Map();
 
 
 // function to start server on given port
@@ -59,12 +65,89 @@ function startServer(port) {
     
         // primary client can opt to work as secondary client
         socket.on("changeClientType", (key) => {
-            if(key == "12345678") {
+            if(key == "12345678" && pClientList.has(socket.id)) {
                 pClientList.delete(socket.id);
                 sClientList.set(socket.id, socket);
                 sClientAvailable.addNode(socket);
+
+                socket.emit('clientTypeChange','success: '+socket.id);
             }
+            else
+                socket.emit('clientTypeChange','failed');
+
+            console.log('No of Users : '+pClientList.size);
+            console.log('No of Nodes : '+sClientList.size);
         });
+
+        socket.on("initiateDataTransfer", ()=>
+        {
+            console.log("initiateDataTransfer");
+
+            var left = sClientAvailable.getLeftNode(socket);
+
+            if(left.id != socket.id)
+            {
+                socket.emit('updateNeighbour', JSON.stringify({socketId: left.id, direction: 'left', cause: 'addition', new: 'true'}));
+                left.emit('updateNeighbour', JSON.stringify({socketId: socket.id, direction: 'right', cause: 'addition'}));
+            }
+
+            var right = sClientAvailable.getRightNode(socket);
+
+            if(right.id != socket.id)
+            {
+                socket.emit('updateNeighbour', JSON.stringify({socketId: right.id, direction: 'right', cause: 'addition', new: 'true'}));
+                right.emit('updateNeighbour', JSON.stringify({socketId: socket.id, direction: 'left', cause: 'addition'}));
+            }
+        })
+
+        socket.on("itemsList", (p)=>
+        {
+
+            console.log("itemsList");
+
+            var params = JSON.parse(p);
+
+            console.log(params);
+
+            var tablesToMove = [];
+
+            params.tableNames.forEach((tableName)=>{
+                if(sClientAvailable.getNode(tableName)==params.dest)
+                    itemsToMove.push(tableName);
+            })
+
+            socket.emit('filteredItemsList', JSON.stringify({dest: params.dest, tableNames: tablesToMove}));
+        })
+
+        socket.on('filteredItems', (p)=>
+        {
+            var params = JSON.parse(p);
+
+            console.log(`filteredItems: source: ${socket.id}, dest: ${params.dest}`);
+
+            var destSocket = sClientList.get(params.dest);
+
+            destSocket.emit('takeYourItems', JSON.stringify({
+                source: socket.id,
+                tableInfo: params.tableInfo,
+                tableData: params.tableData
+            }))
+        })
+
+        socket.on('passMyItems', (p)=>
+        {
+            var params = JSON.parse(p);
+
+            console.log(`passMyItems: source: ${socket.id}, dest: ${params.dest}`);
+
+            var destSocket = sClientList.get(params.dest);
+
+            destSocket.emit('addMyItems', JSON.stringify({
+                source: socket.id,
+                tableInfo: params.tableInfo,
+                tableData: params.tableData
+            }))
+        })
 
         /***
          * receive a query from primary client
@@ -73,13 +156,18 @@ function startServer(port) {
          * return the received result to primary client
          */ 
         socket.on("query", (query) => {
-            var secondaryClient = sClientAvailable.getNode(query)
+            console.log('Incoming query : '+ query.hash);
+            console.log('Received from user : '+socket.request.connection.remoteAddress);
+
+            let secondaryClient = sClientAvailable.getNode(query.table_name);
+            console.log('Forwarded to node : '+secondaryClient.request.connection.remoteAddress);
+            console.log('\n');
             // left and right nodes of main node.
             // var leftSecondaryCLient = ConsistentHashing.getLeftNode(secondaryClient);
             // var rightSecondaryCLient = ConsistentHashing.getRightNode(secondaryClient);
-            queryPClient.set(query,socket);
-            querySClient.set(query,socket);
-            secondaryClient.emit('process',query);
+            queryPClient.set(query.hash,socket);
+            querySClient.set(query.hash,socket);
+            secondaryClient.emit('process',query,1);
         });
 
         /***
@@ -90,7 +178,7 @@ function startServer(port) {
          * i.e. queryPClient and querySClient
          */
         socket.on("processed", (query, result) => {
-            var sendToClient = queryPClient.get(query);
+            var sendToClient = queryPClient.get(query.hash);
             sendToClient.emit("result",query,result);
             queryPClient.delete(sendToClient);
             querySClient.delete(socket);
@@ -106,7 +194,9 @@ function startServer(port) {
                 updateNeighbourAddresses(socket);
                 //this function needs to be implemented
 
-                shuffleOnRemoval(socket);
+                var left = ConsistentHashing.getLeftNode(socket);
+
+                left.emit('mergeData', 'right');  
 
                 sClientList.delete(socket.id);
                 sClientAvailable.removeNode(socket);
@@ -117,46 +207,12 @@ function startServer(port) {
 }
 
 
-shuffleOnAddition(socket)
-{
-    var left = ConsistentHashing.getLeftNode(socket);
 
-    var leftItems = getNodeItemsList(left); 
-    // this function needs to be implemented to get list of items in a node
 
-    var itemsToMove = [];
 
-    leftItems.forEach((item)=>{
-        if(ConsistentHashing.getNode(item)==socket)
-            itemsToMove.push(item);
-    })
 
-    transferItems(itemsToMove, left, 'right');
-    // transferItems(items, node, direction)
-    // this will signal 'node' to transfer ownership of 'items' to the node to 'left/right'
-}
 
-transferItems(items, node, direction)
-{
-    node.emit('transferItems', JSON.stringify({direction: direction, items: items}));
-}
 
-shuffleOnRemoval(socket)
-{
-    var left = ConsistentHashing.getLeftNode(socket);
-    var right = ConsistentHashing.getRightNode(socket);
-
-    mergeData(left, 'right');
-    // mergeData(node, direction)
-    // this will signal 'node' to merge with itself the data of 'right/left' that it contained
-    // and then send the merged data (extra) to the opposite direction for replication
-    // it will also then request the new data
-}
-
-mergeData(node, direction)
-{
-    node.emit('mergeData', direction);
-}
 
 // start the server at specified port
 startServer(8003);

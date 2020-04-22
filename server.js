@@ -191,12 +191,11 @@ function startServer(port) {
             }
             else if(sClientList.get(socket.id)) {
 
-                updateNeighbourAddresses(socket);
-                //this function needs to be implemented
+                var left = sClientAvailable.getLeftNode(socket);
+                var right = sClientAvailable.getRightNode(socket);
 
-                var left = ConsistentHashing.getLeftNode(socket);
-
-                left.emit('mergeData', 'right');  
+                left.emit('updateNeighbour', JSON.stringify({socketId: right.id, direction: 'right', cause: 'removal'}));
+                right.emit('updateNeighbour', JSON.stringify({socketId: left.id, direction: 'left', cause: 'removal'}));
 
                 sClientList.delete(socket.id);
                 sClientAvailable.removeNode(socket);

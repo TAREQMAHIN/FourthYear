@@ -510,7 +510,7 @@ ioClient.on("process", (query, node) => {
 
 ioClient.on('updateNeighbour', (p)=>
 {
-    console.log("updateNeighbour");
+    console.log('updateNeighbour');
 
     var params = JSON.parse(p);
 
@@ -521,14 +521,25 @@ ioClient.on('updateNeighbour', (p)=>
             leftId = params.socketId;
             console.log("leftId: "+leftId);
 
-            if(!params.new)
+            if(params.cause == 'addition')
+            {
+                if(!params.new)
+                {
+                    ioClient.emit('passMyItems', JSON.stringify({
+                        dest: leftId,
+                        tableInfo: table_record[1],
+                        tableData: table_data[1]
+                    }))    
+                }
+            }
+            else if(params.cause == 'removal')
             {
                 ioClient.emit('passMyItems', JSON.stringify({
                     dest: leftId,
                     tableInfo: table_record[1],
                     tableData: table_data[1]
-                }))    
-            }            
+                }))
+            }
         }
     }
     else if(params.direction == 'right')
@@ -538,15 +549,42 @@ ioClient.on('updateNeighbour', (p)=>
             rightId = params.socketId;
             console.log("rightId: "+rightId);
 
-            if(!params.new)
+            if(params.cause == 'addition')
             {
-                ioClient.emit('itemsList', JSON.stringify({dest: rightId, tableNames: [...table_record[1].keys()]}));
+                if(!params.new)
+                {
+                    ioClient.emit('itemsList', JSON.stringify({dest: rightId, tableNames: [...table_record[1].keys()]}));
 
+                    ioClient.emit('passMyItems', JSON.stringify({
+                        dest: rightId,
+                        tableInfo: table_record[1],
+                        tableData: table_data[1]
+                    })) 
+                }    
+            }
+            else if(params.cause == 'removal')
+            {
                 ioClient.emit('passMyItems', JSON.stringify({
                     dest: rightId,
                     tableInfo: table_record[1],
                     tableData: table_data[1]
-                })) 
+                }))
+
+                ioClient.emit('passMyItems', JSON.stringify({
+                    dest: leftId,
+                    tableInfo: table_record[2],
+                    tableData: table_data[2]
+                }))
+
+                //merge right with own
+                table_record[2].forEach((value, key)=>
+                {
+                    table_record[1].set(key, value);
+                    table_data[1].set(key, table_data[2].get(key));
+
+                    table_record[2].delete(key);
+                    table_data[2].delete(key);
+                })
             }
         }
     } 

@@ -56,7 +56,7 @@ function createRandomQuery() {
 
     let property_dict = new Map();
     property_dict[property[0]] = Math.floor(Math.random() * 100000) % 10000;
-    return query.searchQuery(table_name, property_dict, primary_key);
+    return query.searchQuery(table_name, property_dict);
   }
   // insert 
   else if (prob < 0.7) {
@@ -70,7 +70,7 @@ function createRandomQuery() {
     let new_property_dict = new Map();
     for (let i = 0; i < property.length; i++)
       new_property_dict[property[i]] = Math.floor(Math.random() * 100000) % 10000;
-    return query.insertQuery(table_name, new_property_dict, primary_key);
+    return query.insertQuery(table_name, new_property_dict);
   }
   // update 
   else if (prob < 0.85) {
@@ -87,7 +87,7 @@ function createRandomQuery() {
     let new_property_dict = new Map();
     new_property_dict[property[0]] = Math.floor(Math.random() * 100000) % 10000 ;
 
-    return query.updateQuery(table_name, property_dict, new_property_dict, primary_key);
+    return query.updateQuery(table_name, property_dict, new_property_dict);
   }
   // delete an entry
   else if (prob < 0.95) {
@@ -98,7 +98,7 @@ function createRandomQuery() {
     let property_dict = new Map();
     property_dict[property[0]] = Math.floor(Math.random() * 100000) % 10000;
 
-    return query.deleteQuery(table_name, property_dict, primary_key);
+    return query.deleteQuery(table_name, property_dict);
   }
   // delete 
   else if (prob < 1) {

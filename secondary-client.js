@@ -21,7 +21,16 @@ console.log("Node Id : "+node_id);
 const
     io = require("socket.io-client"),
     // var URL = encodeURIComponent()
-    ioClient = io.connect("http://localhost:8003?token=connect_as_node&id="+node_id);
+    ioClient = io.connect("http://localhost:8003",{
+        transportOptions: {
+            polling: {
+                extraHeaders: {
+                    'clientid' : node_id,
+                    'password' : "pass12345678",
+                }
+            }
+        }
+    });
 
 const { fork } = require('child_process');
 
@@ -526,9 +535,9 @@ ioClient.on('addMyItems', (p)=>
 {
     console.log('addMyItems');
 
-    var params = JSON.parse(p);
+    let params = JSON.parse(p);
 
-    var index;
+    let index;
 
     if(params.source == leftId)
         index = 0;

@@ -83,12 +83,11 @@ function createTableQuery(table_name, property, primary_key) {
  * 
  * @param {String} table_name : Name of Table on which Query is to be performed
  * @param {Dictionary} property : Key-Value pairs which the matching object should have. {string}Key-{any}Value.
- * @param {String} primary_key : Primary key of table being searched
  * 
  * @return : Object of Query
  */
-function searchQuery(table_name, property, primary_key) {
-    return new Query('R', table_name, property, null, primary_key);
+function searchQuery(table_name, property) {
+    return new Query('R', table_name, property, null, null);
 }
 
 /**
@@ -96,12 +95,11 @@ function searchQuery(table_name, property, primary_key) {
  * @param {String} table_name : Name of Table on which Query is to be performed
  * @param {Dictionary} property : Key-Value pairs which the matching object should have. {string}Key-{any}Value.
  * @param {Dictionary} new_property : Key-Value to overwrite existing key-value. {string}Key-{any}Value.
- * @param {String} primary_key : Primary key of table to be updated
  * 
  * @return : Object of Query
  */
-function updateQuery(table_name, property, new_property, primary_key) {
-    return new Query('U', table_name, property, new_property, primary_key);
+function updateQuery(table_name, property, new_property) {
+    return new Query('U', table_name, property, new_property, null);
 }
 
 /**
@@ -109,24 +107,22 @@ function updateQuery(table_name, property, new_property, primary_key) {
  * @param {String} table_name : Name of Table on which Query is to be performed
  * @param {Dictionary} property : Key-Value pairs which the matching object should have. {string}Key-{any}Value.
  * @param {Dictionary} new_property : Key-Value to overwrite existing key-value. {string}Key-{any}Value.
- * @param {String} primary_key : Primary key of table to be updated
  * 
  * @return : Object of Query
  */
-function insertQuery(table_name, new_property, primary_key) {
-    return new Query('U', table_name, null, new_property, primary_key);
+function insertQuery(table_name, new_property) {
+    return new Query('U', table_name, null, new_property, null);
 }
 
 /**
  * 
  * @param {String} table_name : Name of Table on which Query is to be performed
  * @param {Dictionary} property : Key-Value pairs which the matching object should have. {string}Key-{any}Value.
- * @param {String} primary_key : Primary key of table
  * 
  * @return : Object of Query
  */
-function deleteQuery(table_name, property, primary_key) {
-    return new Query('D', table_name, property, null, primary_key);
+function deleteQuery(table_name, property) {
+    return new Query('D', table_name, property, null, null);
 }
 
 /**

@@ -2,6 +2,9 @@
 // to create unique random string
 var crypto = require('crypto');
 
+// server.io module
+const io = require("socket.io")();
+
 
 /***
  * Secondary Clients 
@@ -15,14 +18,17 @@ var crypto = require('crypto');
  * 
  * There is only one instance of a node in UniversalHashing 
  * to deal with left - right node chaining
- */ 
+ */
 
 var ConsistentHashing = require('consistent-hashing');
-// consistent hash storage of node_id
+
+// collection of all nodes arranged in ring by consistent hashing (stores {node_id,key} internally)
 var sClientAvailable = new ConsistentHashing(['node1']);
+sClientAvailable.removeNode('node1');
+
 // mapping from node_id to socket
 var sClientList = new Map()
-sClientAvailable.removeNode('node1');
+
 
 
 /***
@@ -31,6 +37,7 @@ sClientAvailable.removeNode('node1');
  * They provide CRUD queries for database.
  * 
  */
+// stores the mapping from socket.id to socket of user
 var pClientList = new Map()
 
 
@@ -50,16 +57,13 @@ var querySClient = new Map();
 
 // function to start server on given port
 function startServer(port) {
-    const io = require("socket.io")(),
-    server = io.listen(port);
+    const server = io.listen(port);
 
     // middleware to configure connection as user or node
     io.use((socket, next) => {
-        let token = socket.handshake.query.token;
-        if(token == "connect_as_node") {
-            sClientList.set(socket.id, socket);
-            let id = socket.handshake.query.id;
-            console.log(id);
+        let password = socket.handshake.headers['password'];
+        if (password == "pass12345678") {
+            sClientList.set(socket.handshake.headers['clientid'], socket);
         }
         else {
             pClientList.set(socket.id, socket);
@@ -67,98 +71,102 @@ function startServer(port) {
         return next();
     });
 
+
+
     /**
      * Events listener for server
      */
 
     // event fired every time a new client connects:
     server.on("connection", (socket) => {
+        // clientid is a valid key in consistent hash ring for a node, and undefined for user
+        let clientid = socket.handshake.headers['clientid'];
+
         // console.log('New connection from ' + socket.request.connection.remoteAddress);
         console.info(`Client connected [id=${socket.id}]`);
-    
-        if(sClientList.get(socket.id)) {
-            sClientAvailable.addNode(socket);
-            socket.emit('clientTypeChange','success');
+        console.log('No of Users : ' + pClientList.size);
+        console.log('No of Nodes : ' + sClientList.size);
 
-            let left = sClientAvailable.getLeftNode(socket);
-            let right = sClientAvailable.getRightNode(socket);
-            if(left != socket)
-            left.emit('updateNeighbour', JSON.stringify({socketId: right.id, direction: 'right', cause: 'addition'}));
-            if(right != socket && right != left)
-            right.emit('updateNeighbour', JSON.stringify({socketId: left.id, direction: 'left', cause: 'addition'}));
+        // if new connection is done by a node, distribute the data to keep 3-node structure consistent
+        if (sClientList.get(clientid)) {
+            // add the new to consistent hash ring
+            sClientAvailable.addNode(clientid);
+            // temporary function to make node shows their storage and processing details when connection is established
+            socket.emit('clientTypeChange', 'success');
 
-        }
-        else {
-            socket.emit('clientTypeChange','failed');
-        }
-        console.log('No of Users : '+pClientList.size);
-        console.log('No of Nodes : '+sClientList.size);
+            // left : clientid of left node according to consistent hash ring
+            // right : clientid of right node according to consistent hash ring
+            let left = sClientList.get(sClientAvailable.getLeftNode(clientid)).handshake.headers['clientid'];
+            let right = sClientList.get(sClientAvailable.getRightNode(clientid)).handshake.headers['clientid'];
 
-        socket.on("initiateDataTransfer", ()=>
-        {
-            console.log("initiateDataTransfer");
-
-            let left = sClientAvailable.getLeftNode(socket);
-
-            if(left.id != socket.id)
-            {
-                socket.emit('updateNeighbour', JSON.stringify({socketId: left.id, direction: 'left', cause: 'addition', new: 'true'}));
-                left.emit('updateNeighbour', JSON.stringify({socketId: socket.id, direction: 'right', cause: 'addition'}));
+            if (left != clientid) {
+                sClientList.get(left).emit('updateNeighbour', JSON.stringify({
+                    socketId: right,
+                    direction: 'right', cause: 'addition'
+                }));
             }
 
-            let right = sClientAvailable.getRightNode(socket);
+            if (right != clientid && right != left) {
+                sClientList.get(right).emit('updateNeighbour', JSON.stringify({
+                    socketId: left,
+                    direction: 'left', cause: 'addition'
+                }));
+            }
 
-            if(right.id != socket.id)
-            {
-                socket.emit('updateNeighbour', JSON.stringify({socketId: right.id, direction: 'right', cause: 'addition', new: 'true'}));
-                right.emit('updateNeighbour', JSON.stringify({socketId: socket.id, direction: 'left', cause: 'addition'}));
+        }
+
+
+        socket.on("initiateDataTransfer", () => {
+            console.log("initiateDataTransfer");
+
+            let left = sClientList.get(sClientAvailable.getLeftNode(clientid)).handshake.headers['clientid'];
+            let right = sClientList.get(sClientAvailable.getRightNode(clientid)).handshake.headers['clientid'];
+
+            if (left != clientid) {
+                socket.emit('updateNeighbour', JSON.stringify({ socketId: left, direction: 'left', cause: 'addition', new: 'true' }));
+                sClientList.get(left).emit('updateNeighbour', JSON.stringify({ socketId: clientid, direction: 'right', cause: 'addition' }));
+            }
+
+            if (right != clientid) {
+                socket.emit('updateNeighbour', JSON.stringify({ socketId: right, direction: 'right', cause: 'addition', new: 'true' }));
+                sClientList.get(right).emit('updateNeighbour', JSON.stringify({ socketId: clientid, direction: 'left', cause: 'addition' }));
             }
         })
 
-        socket.on("itemsList", (p)=>
-        {
-
+        socket.on("itemsList", (p) => {
             console.log("itemsList");
-
             let params = JSON.parse(p);
-
             console.log(params);
 
             let tablesToMove = [];
 
-            params.tableNames.forEach((tableName)=>{
-                if(sClientAvailable.getNode(tableName)==params.dest)
+            params.tableNames.forEach((tableName) => {
+                if (sClientAvailable.getNode(tableName) == params.dest)
                     itemsToMove.push(tableName);
             })
 
-            socket.emit('filteredItemsList', JSON.stringify({dest: params.dest, tableNames: tablesToMove}));
+            socket.emit('filteredItemsList', JSON.stringify({ dest: params.dest, tableNames: tablesToMove }));
         })
 
-        socket.on('filteredItems', (p)=>
-        {
+        socket.on('filteredItems', (p) => {
             let params = JSON.parse(p);
-
-            console.log(`filteredItems: source: ${socket.id}, dest: ${params.dest}`);
-
+            console.log(`filteredItems: source: ${clientid}, dest: ${params.dest}`);
             let destSocket = sClientList.get(params.dest);
 
             destSocket.emit('takeYourItems', JSON.stringify({
-                source: socket.id,
+                source: clientid,
                 tableInfo: params.tableInfo,
                 tableData: params.tableData
             }))
         })
 
-        socket.on('passMyItems', (p)=>
-        {
+        socket.on('passMyItems', (p) => {
             let params = JSON.parse(p);
-
-            console.log(`passMyItems: source: ${socket.id}, dest: ${params.dest}`);
-
+            console.log(`passMyItems: source: ${clientid}, dest: ${params.dest}`);
             let destSocket = sClientList.get(params.dest);
 
             destSocket.emit('addMyItems', JSON.stringify({
-                source: socket.id,
+                source: clientid,
                 tableInfo: params.tableInfo,
                 tableData: params.tableData
             }))
@@ -169,21 +177,28 @@ function startServer(port) {
          * 
          * send it to associated secondary client for processing
          * return the received result to primary client
-         */ 
+         */
         socket.on("query", (query) => {
             // console.log('Incoming query : '+ query.hash);
             // console.log('Received from user : '+socket.request.connection.remoteAddress);
 
-            let secondaryClient = sClientAvailable.getNode(query.table_name);
-            queryPClient.set(query.hash,socket);
-            querySClient.set(query.hash,socket);
-            secondaryClient.emit('process',query,1);
-            if(query.operation != 'R') {
+            let secondaryClientId = sClientAvailable.getNode(query.table_name);
+            let secondaryClient = sClientList.get(secondaryClientId);
+
+            // store the mapping of query and user and associated node
+            queryPClient.set(query.hash, socket.id);
+            querySClient.set(query.hash, secondaryClientId);
+            secondaryClient.emit('process', query, 1);
+
+            // process OLAP queries on neighbouring nodes, to keep them consistent with target node
+            // reduces the chance of loss of data till failure of at max two consecutive node
+            // NOTE : These queries can be queued and executed later to balance work-load
+            if (query.operation != 'R') {
                 // left and right nodes of main node.
-                let leftSecondaryCLient = sClientAvailable.getLeftNode(secondaryClient);
-                let rightSecondaryCLient = sClientAvailable.getRightNode(secondaryClient);
-                leftSecondaryCLient.emit('process',query,2);
-                rightSecondaryCLient.emit('process',query,0);
+                let leftSecondaryCLient = sClientList.get(sClientAvailable.getLeftNode(secondaryClientId));
+                let rightSecondaryCLient = sClientList.get(sClientAvailable.getRightNode(secondaryClientId));
+                leftSecondaryCLient.emit('process', query, 2);
+                rightSecondaryCLient.emit('process', query, 0);
             }
         });
 
@@ -195,34 +210,30 @@ function startServer(port) {
          * i.e. queryPClient and querySClient
          */
         socket.on("processed", (query, result) => {
-            let sendToClient = queryPClient.get(query.hash);
-            sendToClient.emit("result",query,result);
-            queryPClient.delete(sendToClient);
-            querySClient.delete(socket);
+            let userid = queryPClient.get(query.hash);
+            if(userid !== undefined) {
+                pClientList.get(userid).emit("result", query, result);
+                queryPClient.delete(query.hash);
+                querySClient.delete(query.hash);
+            }
         });
 
         // when socket disconnects, remove it from the list:
         socket.on("disconnect", () => {
-            if(pClientList.get(socket.id)) {
+            if (pClientList.get(socket.id)) {
                 pClientList.delete(socket.id);
-                let nodes = sClientAvailable.getNodes();
-                for (let index = 0; index < nodes.length; index++) {
-                    const element = nodes[index];
-                    element.emit("stats");
-                }
             }
-            else if(sClientList.get(socket.id)) {
+            else if (sClientList.get(clientid)) {
+                if (sClientList.size > 1) {
+                    let left = sClientAvailable.getLeftNode(clientid);
+                    let right = sClientAvailable.getRightNode(clientid);
 
-                if(sClientList.size > 1) {
-                    let left = sClientAvailable.getLeftNode(socket);
-                    let right = sClientAvailable.getRightNode(socket);
-
-                    left.emit('updateNeighbour', JSON.stringify({socketId: right.id, direction: 'right', cause: 'removal'}));
-                    if(left != right) right.emit('updateNeighbour', JSON.stringify({socketId: left.id, direction: 'left', cause: 'removal'}));
+                    sClientList.get(left).emit('updateNeighbour', JSON.stringify({ socketId: right, direction: 'right', cause: 'removal' }));
+                    if (left != right) sClientList.get(right).emit('updateNeighbour', JSON.stringify({ socketId: left, direction: 'left', cause: 'removal' }));
                 }
 
-                sClientList.delete(socket.id);
-                sClientAvailable.removeNode(socket);
+                sClientList.delete(clientid);
+                sClientAvailable.removeNode(clientid);
             }
             console.info(`Client gone [id=${socket.id}]`);
         });
@@ -232,20 +243,3 @@ function startServer(port) {
 // start the server at specified port
 startServer(8003);
 console.log("server started at http://127.0.0.1:8003");
-
-// Dummy function to send query to clients
-// Not required now since primary client sends query is implemented
-// setInterval(function() {
-//     if(sClientList.size > 0) {
-//         var query = 'SELECT * from ABCD '+Math.random();
-//         var node = sClientAvailable.getNode(query)
-//         node.emit('data',query);
-//     }
-//     sClientList.forEach(element => {
-//         console.log("Node ID: "+element.id);
-//         console.log("Left Node: "+sClientAvailable.getLeftNode(element).id);
-//         console.log("Right Node: "+sClientAvailable.getRightNode(element).id);
-//         console.log("----------------------------------------------------------");
-//     });
-//     },5000
-// );

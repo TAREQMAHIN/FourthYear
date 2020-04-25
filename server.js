@@ -19,7 +19,7 @@ var crypto = require('crypto');
 
 var ConsistentHashing = require('consistent-hashing');
 var sClientAvailable = new ConsistentHashing(['node1']);
-sClientList = new Map()
+var sClientList = new Map()
 sClientAvailable.removeNode('node1');
 
 /***
@@ -70,7 +70,9 @@ function startServer(port) {
 
                 socket.emit('clientTypeChange','success');
             }
-            socket.emit('clientTypeChange','failed');
+            else {
+                socket.emit('clientTypeChange','failed');
+            }
             console.log('No of Users : '+pClientList.size);
             console.log('No of Nodes : '+sClientList.size);
         });
@@ -82,18 +84,20 @@ function startServer(port) {
          * return the received result to primary client
          */ 
         socket.on("query", (query) => {
-            console.log('Incoming query : '+ query.hash);
-            console.log('Received from user : '+socket.request.connection.remoteAddress);
+            // console.log('Incoming query : '+ query.hash);
+            // console.log('Received from user : '+socket.request.connection.remoteAddress);
 
-            let secondaryClient = sClientAvailable.getNode(query.hash);
-            console.log('Forwarded to node : '+secondaryClient.request.connection.remoteAddress);
-            console.log('\n');
-            // left and right nodes of main node.
-            // var leftSecondaryCLient = ConsistentHashing.getLeftNode(secondaryClient);
-            // var rightSecondaryCLient = ConsistentHashing.getRightNode(secondaryClient);
+            let secondaryClient = sClientAvailable.getNode(query.table_name);
             queryPClient.set(query.hash,socket);
             querySClient.set(query.hash,socket);
             secondaryClient.emit('process',query,1);
+            if(query.operation != 'R') {
+                // left and right nodes of main node.
+                let leftSecondaryCLient = sClientAvailable.getLeftNode(secondaryClient);
+                let rightSecondaryCLient = sClientAvailable.getRightNode(secondaryClient);
+                leftSecondaryCLient.emit('process',query,2);
+                rightSecondaryCLient.emit('process',query,0);
+            }
         });
 
         /***
@@ -114,6 +118,11 @@ function startServer(port) {
         socket.on("disconnect", () => {
             if(pClientList.get(socket.id)) {
                 pClientList.delete(socket.id);
+                let nodes = sClientAvailable.getNodes();
+                for (let index = 0; index < nodes.length; index++) {
+                    const element = nodes[index];
+                    element.emit("stats");
+                }
             }
             else if(sClientList.get(socket.id)) {
                 sClientList.delete(socket.id);

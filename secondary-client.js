@@ -10,13 +10,18 @@
 // to store table information
 const table = require('./table.js');
 
+const sys_process = require('process');
 
 const time = require('./time.js');
+
+const node_id = 'node_'+sys_process.pid;
+console.log("Node Id : "+node_id);
 
 // connect to server on given port
 const
     io = require("socket.io-client"),
-    ioClient = io.connect("http://localhost:8003");
+    // var URL = encodeURIComponent()
+    ioClient = io.connect("http://localhost:8003?token=connect_as_node&id="+node_id);
 
 const { fork } = require('child_process');
 
@@ -24,7 +29,7 @@ const { fork } = require('child_process');
 // default connection is as primary client
 // change to secondary client
 // target the receiver with pre-defined password
-ioClient.emit("changeClientType", "12345678");
+// ioClient.emit("changeClientType", "12345678");
 
 // Log to show client type change
 ioClient.on('clientTypeChange', (msg) => {
@@ -49,6 +54,9 @@ var table_data = new Array(3);
 table_data[0] = new Map(); // left node
 table_data[2] = new Map(); // right node
 table_data[1] = new Map(); // self
+
+
+var leftId, rightId, leftNeighbour, rightNeighbour;
 
 
 var query_stat = new Array(6);
@@ -336,6 +344,8 @@ function deleteOperation(query, node) {
 }
 
 function print_stat() {
+    console.log("***************** Current state of Node *****************");
+
     console.log("No of Create Queries : "+query_stat[0]);
     console.log("No of Read Queries : "+query_stat[1]);
     console.log("No of Update Queries : "+query_stat[2]);
@@ -360,6 +370,9 @@ function print_stat() {
     console.log("Size occupied by data of Left Node : "+JSON.stringify(table_data[0]).length);
     console.log("Size occupied by data of Self Node : "+JSON.stringify(table_data[1]).length);
     console.log("Size occupied by data of Right Node : "+JSON.stringify(table_data[2]).length);
+    
+    console.log("#########################################################");
+    console.log("");
 }
 
 // identfies the type of query and sends it to proper function and return the result of operation
@@ -383,6 +396,150 @@ function query_processor(query, node) {
     }
 }
 
+/**
+ * Events to update neighbouring nodes on addition or removal
+ */
+
+ioClient.on('updateNeighbour', (p)=>
+{
+    console.log('updateNeighbour');
+
+    var params = JSON.parse(p);
+
+    if(params.direction == 'left')
+    {
+        if(!leftId || leftId != params.socketId)
+        {
+            leftId = params.socketId;
+            console.log("leftId: "+leftId);
+
+            if(params.cause == 'addition')
+            {
+                if(!params.new)
+                {
+                    ioClient.emit('passMyItems', JSON.stringify({
+                        dest: leftId,
+                        tableInfo: table_record[1],
+                        tableData: table_data[1]
+                    }))    
+                }
+            }
+            else if(params.cause == 'removal')
+            {
+                ioClient.emit('passMyItems', JSON.stringify({
+                    dest: leftId,
+                    tableInfo: table_record[1],
+                    tableData: table_data[1]
+                }))
+            }
+        }
+    }
+    else if(params.direction == 'right')
+    {
+        if(!rightId || rightId != params.socketId)
+        {
+            rightId = params.socketId;
+            console.log("rightId: "+rightId);
+
+            if(params.cause == 'addition')
+            {
+                if(!params.new)
+                {
+                    ioClient.emit('itemsList', JSON.stringify({dest: rightId, tableNames: [...table_record[1].keys()]}));
+
+                    ioClient.emit('passMyItems', JSON.stringify({
+                        dest: rightId,
+                        tableInfo: table_record[1],
+                        tableData: table_data[1]
+                    })) 
+                }    
+            }
+            else if(params.cause == 'removal')
+            {
+                ioClient.emit('passMyItems', JSON.stringify({
+                    dest: rightId,
+                    tableInfo: table_record[1],
+                    tableData: table_data[1]
+                }))
+
+                ioClient.emit('passMyItems', JSON.stringify({
+                    dest: leftId,
+                    tableInfo: table_record[2],
+                    tableData: table_data[2]
+                }))
+
+                //merge right with own
+                table_record[2].forEach((value, key)=>
+                {
+                    table_record[1].set(key, value);
+                    table_data[1].set(key, table_data[2].get(key));
+
+                    table_record[2].delete(key);
+                    table_data[2].delete(key);
+                })
+            }
+        }
+    } 
+})
+
+ioClient.on('filteredItemsList', (p)=>
+{
+    console.log('filteredItemsList');
+
+    var params = JSON.parse(p);
+
+    var toSendTableInfo = new Map();
+    var toSendTableData = new Map();
+
+    params.tableNames.forEach((tableName)=>
+    {
+        toSendTableInfo.set(tableName, table_record[1].get(tableName));
+        toSendTableData.set(tableName, table_data[1].get(tableName));
+
+        table_record[2].set(tableName, table_record[1].get(tableName));
+        table_data[2].set(tableName, table_data[1].get(tableName));
+
+        table_record[1].delete(tableName);
+        table_data[1].delete(tableName);
+    })
+
+    ioClient.emit("filteredItems", JSON.stringify({
+        dest: params.dest,
+        tableInfo: toSendTableInfo,
+        tableData: toSendTableData
+    }));
+})
+
+ioClient.on('takeYourItems', (p)=>
+{
+    console.log('takeYourItems');
+
+    var params = JSON.parse(p);
+
+    Object.keys(params.tableInfo).forEach((key)=>{
+        table_record[1].set(key, params.tableInfo[key]);
+        table_data[1].set(key, params.tableData[key]);
+    })
+})
+
+ioClient.on('addMyItems', (p)=>
+{
+    console.log('addMyItems');
+
+    var params = JSON.parse(p);
+
+    var index;
+
+    if(params.source == leftId)
+        index = 0;
+    else if(params.source == rightId)
+        index = 2;
+
+    Object.keys(params.tableInfo).forEach((key)=>{
+        table_record[index].set(key, params.tableInfo[key]);
+        table_data[index].set(key, params.tableData[key]);
+    })
+})
 
 /**
  * 

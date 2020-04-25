@@ -1,32 +1,26 @@
-/**
- * Secondary Client
- * 
- * Receives queries from server and sends result after processing it
- */
-
-
 
 
 // to store table information
 const table = require('./table.js');
 
-const sys_process = require('process');
-
 const time = require('./time.js');
+//for child process
+const cluster = require('cluster');
+var pro = require("process");
 
-const node_id = 'node_'+sys_process.pid;
-console.log("Node Id : "+node_id);
+const node_id = 'node_' + pro.pid;
+console.log("Node Id : " + node_id);
 
 // connect to server on given port
 const
     io = require("socket.io-client"),
     // var URL = encodeURIComponent()
-    ioClient = io.connect("http://localhost:8003",{
+    ioClient = io.connect("http://localhost:8003", {
         transportOptions: {
             polling: {
                 extraHeaders: {
-                    'clientid' : node_id,
-                    'password' : "pass12345678",
+                    'clientid': node_id,
+                    'password': "pass12345678",
                 }
             }
         }
@@ -54,8 +48,8 @@ var dict = new Array();
 
 // information of tables on itself and associated left and right node
 var table_record = new Array(3);
-table_record[0]  = new Map(); // left node
-table_record[2]  = new Map(); // right node
+table_record[0] = new Map(); // left node
+table_record[2] = new Map(); // right node
 table_record[1] = new Map(); // self
 
 // data storage of tables
@@ -73,14 +67,14 @@ var min_time = new Array(6);
 var max_time = new Array(6);
 var time_spent = new Array(6);
 
-for(let i=0; i<6; i++) {
+for (let i = 0; i < 6; i++) {
     query_stat[i] = 0;
     time_spent[i] = 0;
 }
 //create 
-function createOperation(query,node) {
+function createOperation(query, node) {
     let st = Date.now();
-    if(min_time[0] == null) min_time[0] = time.timestamp();
+    if (min_time[0] == null) min_time[0] = time.timestamp();
     max_time[0] = time.timestamp();
     query_stat[0] += 1;
     let res = null;
@@ -94,14 +88,14 @@ function createOperation(query,node) {
         // console.log(table_record[node]);
         res = "Table Created Successfully";
     }
-    time_spent[0] += Date.now()-st;
+    time_spent[0] += Date.now() - st;
     return res;
 }
 
 //search
 function searchOperation(query, node) {
     let st = Date.now();
-    if(min_time[1] == null) min_time[1] = time.timestamp();
+    if (min_time[1] == null) min_time[1] = time.timestamp();
     max_time[1] = time.timestamp();
     query_stat[1] += 1;
     let res;
@@ -129,7 +123,7 @@ function searchOperation(query, node) {
                 }
             }
         }
-        else if(table_data[node][query.table_name][query.property[pk]] !== undefined){
+        else if (table_data[node][query.table_name][query.property[pk]] !== undefined) {
             let temp = table_data[node][query.table_name][query.property[pk]];
             matches = true;
             for (const key in query.property) {
@@ -146,15 +140,15 @@ function searchOperation(query, node) {
             res = "Matching results are \n" + match.toString();
         else res = "No matching record found";
     }
-    
-    time_spent[1] += Date.now()-st;
+
+    time_spent[1] += Date.now() - st;
     return res;
 }
 
 //update
 function updateOperation(query, node) {
     let st = Date.now();
-    if(min_time[2] == null) min_time[2] = time.timestamp();
+    if (min_time[2] == null) min_time[2] = time.timestamp();
     max_time[2] = time.timestamp();
     query_stat[2] += 1;
     let res;
@@ -185,7 +179,7 @@ function updateOperation(query, node) {
             pk = table_record[node][query.table_name].primary_key;
             if (query.property[pk] !== undefined) {
                 let temp = table_data[node][query.table_name][query.property[pk]];
-                if(temp !== undefined) {
+                if (temp !== undefined) {
                     matches = true;
                     for (const key in query.property) {
                         if (temp[key] != query.property[key]) {
@@ -275,13 +269,13 @@ function updateOperation(query, node) {
     else {
         res = "Queried table does not exist";
     }
-    time_spent[2] += Date.now()-st;
+    time_spent[2] += Date.now() - st;
     return res;
 }
 
 //delete
 function deleteOperation(query, node) {
-    if(min_time[3] == null) min_time[3] = time.timestamp();
+    if (min_time[3] == null) min_time[3] = time.timestamp();
     max_time[3] = time.timestamp();
     query_stat[3] += 1;
     let st = Date.now();
@@ -307,7 +301,7 @@ function deleteOperation(query, node) {
             // query parameters contain primary_key
             if (query.property[pk] !== undefined) {
                 let temp = table_data[node][query.table_name][query.property[pk]];
-                if(temp !== undefined) {
+                if (temp !== undefined) {
                     matches = true;
                     for (const key in query.property) {
                         if (temp[key] != query.property[key]) {
@@ -348,38 +342,38 @@ function deleteOperation(query, node) {
     else {
         res = "No such table exists";
     }
-    time_spent[0] += Date.now()-st;
+    time_spent[0] += Date.now() - st;
     return res;
 }
 
 function print_stat() {
     console.log("***************** Current state of Node *****************");
 
-    console.log("No of Create Queries : "+query_stat[0]);
-    console.log("No of Read Queries : "+query_stat[1]);
-    console.log("No of Update Queries : "+query_stat[2]);
-    console.log("No of Delete Queries : "+query_stat[3]);
+    console.log("No of Create Queries : " + query_stat[0]);
+    console.log("No of Read Queries : " + query_stat[1]);
+    console.log("No of Update Queries : " + query_stat[2]);
+    console.log("No of Delete Queries : " + query_stat[3]);
 
-    
-    console.log("First Create Query at: "+min_time[0]);
-    console.log("Last Create Query at: "+max_time[0]);
-    console.log("First Read Query at: "+min_time[1]);
-    console.log("Last Read Query at: "+max_time[1]);
-    console.log("First Update Query at: "+min_time[2]);
-    console.log("Last Update Query at: "+max_time[2]);
-    console.log("First Delete Query at: "+min_time[3]);
-    console.log("Last Delete Query at: "+max_time[3]);
+
+    console.log("First Create Query at: " + min_time[0]);
+    console.log("Last Create Query at: " + max_time[0]);
+    console.log("First Read Query at: " + min_time[1]);
+    console.log("Last Read Query at: " + max_time[1]);
+    console.log("First Update Query at: " + min_time[2]);
+    console.log("Last Update Query at: " + max_time[2]);
+    console.log("First Delete Query at: " + min_time[3]);
+    console.log("Last Delete Query at: " + max_time[3]);
 
     console.log("NOTE: Only Individual query taking more than 1ms is recorded");
-    console.log("Time taken in overall create query : "+time_spent[0]);
-    console.log("Time taken in overall read query : "+time_spent[1]);
-    console.log("Time taken in overall update query : "+time_spent[2]);
-    console.log("Time taken in overall delete query : "+time_spent[3]);
+    console.log("Time taken in overall create query : " + time_spent[0]);
+    console.log("Time taken in overall read query : " + time_spent[1]);
+    console.log("Time taken in overall update query : " + time_spent[2]);
+    console.log("Time taken in overall delete query : " + time_spent[3]);
 
-    console.log("Size occupied by data of Left Node : "+JSON.stringify(table_data[0]).length);
-    console.log("Size occupied by data of Self Node : "+JSON.stringify(table_data[1]).length);
-    console.log("Size occupied by data of Right Node : "+JSON.stringify(table_data[2]).length);
-    
+    console.log("Size occupied by data of Left Node : " + JSON.stringify(table_data[0]).length);
+    console.log("Size occupied by data of Self Node : " + JSON.stringify(table_data[1]).length);
+    console.log("Size occupied by data of Right Node : " + JSON.stringify(table_data[2]).length);
+
     console.log("#########################################################");
     console.log("");
 }
@@ -409,32 +403,26 @@ function query_processor(query, node) {
  * Events to update neighbouring nodes on addition or removal
  */
 
-ioClient.on('updateNeighbour', (p)=>
-{
+ioClient.on('updateNeighbour', (p) => {
     console.log('updateNeighbour');
 
     var params = JSON.parse(p);
 
-    if(params.direction == 'left')
-    {
-        if(!leftId || leftId != params.socketId)
-        {
+    if (params.direction == 'left') {
+        if (!leftId || leftId != params.socketId) {
             leftId = params.socketId;
-            console.log("leftId: "+leftId);
+            console.log("leftId: " + leftId);
 
-            if(params.cause == 'addition')
-            {
-                if(!params.new)
-                {
+            if (params.cause == 'addition') {
+                if (!params.new) {
                     ioClient.emit('passMyItems', JSON.stringify({
                         dest: leftId,
                         tableInfo: table_record[1],
                         tableData: table_data[1]
-                    }))    
+                    }))
                 }
             }
-            else if(params.cause == 'removal')
-            {
+            else if (params.cause == 'removal') {
                 ioClient.emit('passMyItems', JSON.stringify({
                     dest: leftId,
                     tableInfo: table_record[1],
@@ -443,28 +431,23 @@ ioClient.on('updateNeighbour', (p)=>
             }
         }
     }
-    else if(params.direction == 'right')
-    {
-        if(!rightId || rightId != params.socketId)
-        {
+    else if (params.direction == 'right') {
+        if (!rightId || rightId != params.socketId) {
             rightId = params.socketId;
-            console.log("rightId: "+rightId);
+            console.log("rightId: " + rightId);
 
-            if(params.cause == 'addition')
-            {
-                if(!params.new)
-                {
-                    ioClient.emit('itemsList', JSON.stringify({dest: rightId, tableNames: [...table_record[1].keys()]}));
+            if (params.cause == 'addition') {
+                if (!params.new) {
+                    ioClient.emit('itemsList', JSON.stringify({ dest: rightId, tableNames: [...table_record[1].keys()] }));
 
                     ioClient.emit('passMyItems', JSON.stringify({
                         dest: rightId,
                         tableInfo: table_record[1],
                         tableData: table_data[1]
-                    })) 
-                }    
+                    }))
+                }
             }
-            else if(params.cause == 'removal')
-            {
+            else if (params.cause == 'removal') {
                 ioClient.emit('passMyItems', JSON.stringify({
                     dest: rightId,
                     tableInfo: table_record[1],
@@ -478,8 +461,7 @@ ioClient.on('updateNeighbour', (p)=>
                 }))
 
                 //merge right with own
-                table_record[2].forEach((value, key)=>
-                {
+                table_record[2].forEach((value, key) => {
                     table_record[1].set(key, value);
                     table_data[1].set(key, table_data[2].get(key));
 
@@ -488,11 +470,10 @@ ioClient.on('updateNeighbour', (p)=>
                 })
             }
         }
-    } 
+    }
 })
 
-ioClient.on('filteredItemsList', (p)=>
-{
+ioClient.on('filteredItemsList', (p) => {
     console.log('filteredItemsList');
 
     var params = JSON.parse(p);
@@ -500,8 +481,7 @@ ioClient.on('filteredItemsList', (p)=>
     var toSendTableInfo = new Map();
     var toSendTableData = new Map();
 
-    params.tableNames.forEach((tableName)=>
-    {
+    params.tableNames.forEach((tableName) => {
         toSendTableInfo.set(tableName, table_record[1].get(tableName));
         toSendTableData.set(tableName, table_data[1].get(tableName));
 
@@ -519,32 +499,30 @@ ioClient.on('filteredItemsList', (p)=>
     }));
 })
 
-ioClient.on('takeYourItems', (p)=>
-{
+ioClient.on('takeYourItems', (p) => {
     console.log('takeYourItems');
 
     var params = JSON.parse(p);
 
-    Object.keys(params.tableInfo).forEach((key)=>{
+    Object.keys(params.tableInfo).forEach((key) => {
         table_record[1].set(key, params.tableInfo[key]);
         table_data[1].set(key, params.tableData[key]);
     })
 })
 
-ioClient.on('addMyItems', (p)=>
-{
+ioClient.on('addMyItems', (p) => {
     console.log('addMyItems');
 
     let params = JSON.parse(p);
 
     let index;
 
-    if(params.source == leftId)
+    if (params.source == leftId)
         index = 0;
-    else if(params.source == rightId)
+    else if (params.source == rightId)
         index = 2;
 
-    Object.keys(params.tableInfo).forEach((key)=>{
+    Object.keys(params.tableInfo).forEach((key) => {
         table_record[index].set(key, params.tableInfo[key]);
         table_data[index].set(key, params.tableData[key]);
     })
@@ -553,40 +531,36 @@ ioClient.on('addMyItems', (p)=>
 /**
  * 
  * @param query : query to be processed
- * 
- * TODO: Actual result after processing query
- * @returns : Dummy string showing processing time and name of processing client
+ * @param node : left,right or self (i.e [0,2,1])
  */
 
+
 function process(query, node) {
-    let res = query_processor(query, node);
-    // console.log(query);
-    // console.log(res);
-    ioClient.emit('processed', query, res);
-    return;
+    //oltp query
     if (query.operation != 'R') {
-        //process oltp query as it is and record answer in res
-        ioClient.emit('processed', query, res);
+        if (cluster.isMaster) {
+            //processing oltp query
+            let res = query_processor(query, node);
+            // console.log(query);
+            // console.log(res);
+            ioClient.emit('processed', query, res);
+        }
     }
     else {
-        if (olap_queue.length > 0) {
-            olap_queue.push(query);
+        //process olap query in child process
+
+        if (cluster.isMaster) {
+            //create a new child
+            cluster.fork();
         }
         else {
-            const forked = fork('node_base.js');
-            forked.send({ dict: dict });
-
+            //process the olap query in child process
+            let res = query_processor(query, node);
+            //  console.log(query);
+            //  console.log(res);
+            ioClient.emit('processed', query, res);
+            pro.kill(pro.pid, 'SIGINT');
         }
-    }
-}
-
-// function which processes query from query_queue and removes it from query_queue and sends the result
-function process_query(query, node) {
-    if (query_queue.length > 0) {
-        var q = query_queue[0];
-        // console.log('processing query ' + q.hash);
-        query_queue.splice(0, 1);
-        process(q);
     }
 }
 
@@ -598,17 +572,18 @@ function process_query(query, node) {
  * Places the query on query_queue and calls process_query() to process the queue
  * NOTE : requires some better mechanism to handle asynochronity
  */
+
+
 ioClient.on("process", (query, node) => {
     // console.log('received query: ' + query.hash);
     process(query, node);
 });
 
-ioClient.on("stats",() => {
+ioClient.on("stats", () => {
     print_stat();
 });
 
 module.exports = {
     olap_queue: olap_queue,
-    ioClient: ioClient
-
+    ioClient: ioClient,
 };

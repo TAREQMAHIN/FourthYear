@@ -33,12 +33,12 @@ let cnt = 0;
 function createRandomQuery() {
   let prob = Math.random();
   // create
-  if (prob < 0.0001 || table_record.length == 0) {
+  if (prob < 0.00001 || table_record.length == 0) {
     cnt += 1;
     let tableName = 'table_' + crypto.randomBytes(20).toString('hex');
     let property = new Array();
     // populating property array with some random property set of length l
-    let l = Math.floor(Math.random() * 1000) % 5 + 200;
+    let l = Math.floor(Math.random() * 1000) % 5 + 1;
     for (let i = 1; i <= l; i++) {
       property.push('prop_' + i);
     }
@@ -55,7 +55,7 @@ function createRandomQuery() {
     let primary_key = table.primary_key;
 
     let property_dict = new Map();
-    property_dict[property[0]] = Math.floor(Math.random() * 100000) % 10000;
+    property_dict[property[0]] = Math.floor(Math.random() * 100000) % 1000;
     return query.searchQuery(table_name, property_dict);
   }
   // insert 
@@ -69,7 +69,7 @@ function createRandomQuery() {
     // new value
     let new_property_dict = new Map();
     for (let i = 0; i < property.length; i++)
-      new_property_dict[property[i]] = Math.floor(Math.random() * 100000) % 10000;
+      new_property_dict[property[i]] = Math.floor(Math.random() * 100000) % 1000;
     return query.insertQuery(table_name, new_property_dict);
   }
   // update 
@@ -90,13 +90,13 @@ function createRandomQuery() {
     return query.updateQuery(table_name, property_dict, new_property_dict);
   }
   // delete an entry
-  else if (prob < 0.95) {
+  else if (prob < 0.9999) {
     let table = table_record[Math.floor(Math.random() * 1000) % table_record.length];
     let table_name = table.name;
     let property = table.property;
     let primary_key = table.primary_key;
     let property_dict = new Map();
-    property_dict[property[0]] = Math.floor(Math.random() * 100000) % 10000;
+    property_dict[property[0]] = Math.floor(Math.random() * 100000) % 1000;
 
     return query.deleteQuery(table_name, property_dict);
   }
@@ -129,9 +129,8 @@ function sendQuery(query_packet) {
  * @param result : result of query
  * 
  */
-ioClient.on('result', (query, result) => {
+ioClient.on('result', (result) => {
   // console.log('response received');
-  // console.log(query);
   // console.log(result);
   // console.log('\n');
 });
@@ -141,8 +140,8 @@ var count = 1;
 setInterval(function () {
   // if(cnt%1000 == 0) console.log(cnt);
   let newQuery = createRandomQuery();
-  // newQuery.print();
+  newQuery.print();
   sendQuery(newQuery);
   count = count + 1;
-}, 0
+}, 5000
 );

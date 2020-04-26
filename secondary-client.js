@@ -12,10 +12,34 @@ const node_id = 'node_' + pro.pid;
 console.log("Node Id : " + node_id);
 
 // connect to server on given port
-const
-    io = require("socket.io-client"),
-    // var URL = encodeURIComponent()
-    ioClient = io.connect("http://localhost:8003", {
+const io = require("socket.io-client");
+
+
+
+/**
+ * @param query_hash : The hash of query, used to identify and associate it at server
+ * @param status : status code
+ * @param message : message 
+ * @param data : data to be sent to user
+ * @param block : left-0, self-1, right-2 (integer)
+ * 
+ * # status_codes
+ * 200: Query Executed Successfully
+ * 400: Query failed or table not found
+ */
+class QueryResponse {
+    constructor(query_hash, status, message, data, block) {
+        this.query_hash = query_hash;
+        this.status = status;
+        this.message = message;
+        this.data = data;
+        this.block = block;
+    }
+}
+
+
+if(cluster.isMaster) {
+    var ioClient = io.connect("http://localhost:8003", {
         transportOptions: {
             polling: {
                 extraHeaders: {
@@ -25,6 +49,7 @@ const
             }
         }
     });
+}
 
 const { fork } = require('child_process');
 
@@ -43,7 +68,7 @@ ioClient.on('clientTypeChange', (msg) => {
 // TODO : priority_queue with priority considering Data Hazrads
 var query_queue = new Array();
 var olap_queue = new Array();
-var dict = new Array();
+let dict = new Array();
 
 
 // information of tables on itself and associated left and right node
@@ -73,37 +98,31 @@ for (let i = 0; i < 6; i++) {
 }
 //create 
 function createOperation(query, node) {
-    let st = Date.now();
-    if (min_time[0] == null) min_time[0] = time.timestamp();
-    max_time[0] = time.timestamp();
-    query_stat[0] += 1;
-    let res = null;
+    let response = new QueryResponse(query.hash, 400, null, null, node);
+
     if (table_record[node].has(query.table_name)) {
-        res = "A table with same name already exists";
+        response.message = "A table with same name already exists";
+        response.status = 200;
     }
     else {
         table_record[node][query.table_name] = new table.Table(query.table_name, query.property, query.primary_key);
         table_data[node][query.table_name] = new Map();
         // console.log('All tables');
         // console.log(table_record[node]);
-        res = "Table Created Successfully";
+        response.message = "Table Created Successfully";
+        response.status = 200;
     }
-    time_spent[0] += Date.now() - st;
-    return res;
+    return response;
 }
 
 //search
 function searchOperation(query, node) {
-    let st = Date.now();
-    if (min_time[1] == null) min_time[1] = time.timestamp();
-    max_time[1] = time.timestamp();
-    query_stat[1] += 1;
-    let res;
+    let response = new QueryResponse(query.hash, 400, null, null, node);
     // console.log('All table data on associated node');
     // console.log(table_data[node]);
     // console.log('\n');
     if (table_record[node][query.table_name] === undefined) {
-        res = "Queried table does not exist";
+        response.message = "Queried table does not exist";
     }
     else {
         let match = new Array();
@@ -136,28 +155,31 @@ function searchOperation(query, node) {
                 match.push(temp);
             }
         }
-        if (match.length > 0)
-            res = "Matching results are \n" + match.toString();
-        else res = "No matching record found";
+        if (match.length > 0) {
+            response.message = "Matches found";
+            response.status = 200;
+            response.data = match;
+        }
+        else {
+            response.message = "No matching record found";
+            response.status = 200;
+        }
     }
 
-    time_spent[1] += Date.now() - st;
-    return res;
+    return response;
 }
 
 //update
 function updateOperation(query, node) {
-    let st = Date.now();
-    if (min_time[2] == null) min_time[2] = time.timestamp();
-    max_time[2] = time.timestamp();
-    query_stat[2] += 1;
-    let res;
+    let response = new QueryResponse(query.hash, 400, null, null, node);
+
     if (table_record[node][query.table_name] !== undefined) {
         // Insert Query
         if (query.property == null) {
             pk_val = query.new_property[table_record[node][query.table_name].primary_key];
             if (table_data[node][query.table_name][pk_val] !== undefined) {
-                res = "An entry with same primary key already exists\n";
+                response.message = "An entry with same primary key already exists";
+                response.status = 200;
             }
             else {
                 // console.log('Table data before insertion');
@@ -167,7 +189,8 @@ function updateOperation(query, node) {
                 // console.log('Table data after insertion');
                 // console.log(table_data[node][query.table_name]);
                 // console.log('\n');
-                res = "Data inserted successfully";
+                response.message = "Data inserted successfully";
+                response.status = 200;
             }
         }
         // Update Query
@@ -191,7 +214,8 @@ function updateOperation(query, node) {
                         // changes requested in primary key
                         if (query.new_property[pk] !== undefined) {
                             if (table_data[node][query.table_name][query.new_property[pk]] !== undefined) {
-                                res = "An existing entry with same primary key exist";
+                                response.message = "An existing entry with same primary key exist";
+                                response.status = 200;
                             }
                             else {
                                 table_data[node][query.table_name][query.new_property[pk]] = table_data[node][query.table_name][query.property[pk]];
@@ -202,7 +226,8 @@ function updateOperation(query, node) {
                                 // console.log('Table data after update');
                                 // console.log(table_data[node][query.table_name]);
                                 // console.log('\n');
-                                res = "1 record updated successfully\n";
+                                response.message = "1 record updated successfully";
+                                response.status = 200;
                             }
                         }
                         else {
@@ -212,15 +237,18 @@ function updateOperation(query, node) {
                             // console.log('Table data after update');
                             // console.log(table_data[node][query.table_name]);
                             // console.log('\n');
-                            res = "1 record updated successfully\n";
+                            response.message = "1 record updated successfully";
+                            response.status = 200;
                         }
                     }
                     else {
-                        res = "No matching record to update";
+                        response.message = "No matching record to update";
+                        response.status = 200;
                     }
                 }
                 else {
-                    res = "No matching record to update";
+                    response.message = "No matching record to update";
+                    response.status = 200;
                 }
             }
             else {
@@ -237,7 +265,8 @@ function updateOperation(query, node) {
                         // changes requested in primary key
                         if (query.new_property[pk] !== undefined) {
                             if (table_data[node][query.table_name][query.new_property[pk]] !== undefined) {
-                                res = "An existing entry with same primary key exist";
+                                response.message = "An existing entry with same primary key exist";
+                                response.status = 200;
                             }
                             else {
                                 table_data[node][query.table_name][query.new_property[pk]] = table_data[node][query.table_name][query.property[pk]];
@@ -257,29 +286,28 @@ function updateOperation(query, node) {
                         // console.log('Table data after update');
                         // console.log(table_data[node][query.table_name]);
                         // console.log('\n');
-                        res = cnt + " record updated successfully\n";
+                        response.message = cnt + " record updated successfully\n";
+                        response.status  = 200;
                     }
                     else {
-                        res = "No matching record to update";
+                        response.message = "No matching record to update";
+                        response.status = 200;
                     }
                 }
             }
         }
     }
     else {
-        res = "Queried table does not exist";
+        response.message = "Queried table does not exist";
     }
-    time_spent[2] += Date.now() - st;
-    return res;
+
+    return response;
 }
 
 //delete
 function deleteOperation(query, node) {
-    if (min_time[3] == null) min_time[3] = time.timestamp();
-    max_time[3] = time.timestamp();
-    query_stat[3] += 1;
-    let st = Date.now();
-    let res;
+    let response = new QueryResponse(query.hash, 400, null, null, node);
+
     if (table_record[node][query.table_name] !== undefined) {
         if (query.property == null) {
             // console.log('All table before deletion');
@@ -290,7 +318,8 @@ function deleteOperation(query, node) {
             // console.log('All table after deletion');
             // console.log(table_record[node]);
             // console.log('\n');
-            res = "Table deleted sucessfully";
+            response.message = "Table deleted sucessfully";
+            response.status = 200;
         }
         else {
             // console.log('Table data before deletion');
@@ -315,7 +344,8 @@ function deleteOperation(query, node) {
                     }
                 }
                 else {
-                    res = "No matching record to delete";
+                    response.message = "No matching record to delete";
+                    response.status = 200;
                 }
             }
             else {
@@ -336,14 +366,14 @@ function deleteOperation(query, node) {
             // console.log('Table data after deletion');
             // console.log(table_record[node][query.table_name]);
             // console.log('\n');
-            res = cnt + " records deleted successfully";
+            response.message = cnt + " records deleted successfully";
+            response.status = 200;
         }
     }
     else {
-        res = "No such table exists";
+        response.message = "No such table exists";
     }
-    time_spent[0] += Date.now() - st;
-    return res;
+    return response;
 }
 
 function print_stat() {
@@ -381,18 +411,44 @@ function print_stat() {
 // identfies the type of query and sends it to proper function and return the result of operation
 function query_processor(query, node) {
     let res;
+    let st = Date.now();
     switch (query.operation) {
         case 'C':
+            if (min_time[0] == null) min_time[0] = time.timestamp();
+            max_time[0] = time.timestamp();
+            query_stat[0] += 1;
+
             res = createOperation(query, node);
+
+            time_spent[0] += Date.now() - st;
             return res;
+
         case 'R':
+            if (min_time[1] == null) min_time[1] = time.timestamp();
+            max_time[1] = time.timestamp();
+            query_stat[1] += 1;
+
             res = searchOperation(query, node);
+
+            time_spent[1] += Date.now() - st;
             return res;
         case 'U':
+            if (min_time[2] == null) min_time[2] = time.timestamp();
+            max_time[2] = time.timestamp();
+            query_stat[2] += 1;
+
             res = updateOperation(query, node);
+
+            time_spent[2] += Date.now() - st;
             return res;
         case 'D':
+            if (min_time[3] == null) min_time[3] = time.timestamp();
+            max_time[3] = time.timestamp();
+            query_stat[3] += 1;
+
             res = deleteOperation(query, node);
+
+            time_spent[3] += Date.now() - st;
             return res;
         default:
             return "Invalid Query";
@@ -406,7 +462,7 @@ function query_processor(query, node) {
 ioClient.on('updateNeighbour', (p) => {
     console.log('updateNeighbour');
 
-    var params = JSON.parse(p);
+    let params = JSON.parse(p);
 
     if (params.direction == 'left') {
         if (!leftId || leftId != params.socketId) {
@@ -476,10 +532,10 @@ ioClient.on('updateNeighbour', (p) => {
 ioClient.on('filteredItemsList', (p) => {
     console.log('filteredItemsList');
 
-    var params = JSON.parse(p);
+    let params = JSON.parse(p);
 
-    var toSendTableInfo = new Map();
-    var toSendTableData = new Map();
+    let toSendTableInfo = new Map();
+    let toSendTableData = new Map();
 
     params.tableNames.forEach((tableName) => {
         toSendTableInfo.set(tableName, table_record[1].get(tableName));
@@ -502,7 +558,7 @@ ioClient.on('filteredItemsList', (p) => {
 ioClient.on('takeYourItems', (p) => {
     console.log('takeYourItems');
 
-    var params = JSON.parse(p);
+    let params = JSON.parse(p);
 
     Object.keys(params.tableInfo).forEach((key) => {
         table_record[1].set(key, params.tableInfo[key]);
@@ -523,8 +579,14 @@ ioClient.on('addMyItems', (p) => {
         index = 2;
 
     Object.keys(params.tableInfo).forEach((key) => {
-        table_record[index].set(key, params.tableInfo[key]);
-        table_data[index].set(key, params.tableData[key]);
+        try {
+            table_record[index].set(key, params.tableInfo[key]);
+            table_data[index].set(key, params.tableData[key]);
+        } catch (error) {
+            console.log('index: '+index);
+            console.log(error);
+        }
+        
     })
 })
 
@@ -536,14 +598,17 @@ ioClient.on('addMyItems', (p) => {
 
 
 function process(query, node) {
+    console.log('processing node: '+node);
+    console.log(table_record[node]);
     //oltp query
-    if (query.operation != 'R') {
+    if (true) {
         if (cluster.isMaster) {
             //processing oltp query
             let res = query_processor(query, node);
+            // console.log(query,res);
             // console.log(query);
             // console.log(res);
-            ioClient.emit('processed', query, res);
+            ioClient.emit('processed', JSON.stringify(res));
         }
     }
     else {
@@ -558,7 +623,7 @@ function process(query, node) {
             let res = query_processor(query, node);
             //  console.log(query);
             //  console.log(res);
-            ioClient.emit('processed', query, res);
+            ioClient.emit('processed', JSON.stringify(res));
             pro.kill(pro.pid, 'SIGINT');
         }
     }
@@ -567,7 +632,7 @@ function process(query, node) {
 /**
  * Receiver to listen for incoming query
  * 
- * @param query: query recived from server
+ * @param query: query received from server
  * 
  * Places the query on query_queue and calls process_query() to process the queue
  * NOTE : requires some better mechanism to handle asynochronity

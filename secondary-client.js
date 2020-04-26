@@ -1,70 +1,4 @@
 
-
-// to store table information
-const table = require('./table.js');
-
-const time = require('./time.js');
-//for child process
-const cluster = require('cluster');
-var pro = require("process");
-
-const node_id = 'node_' + pro.pid;
-console.log("Node Id : " + node_id);
-
-// connect to server on given port
-const io = require("socket.io-client");
-
-
-
-/**
- * @param query_hash : The hash of query, used to identify and associate it at server
- * @param status : status code
- * @param message : message 
- * @param data : data to be sent to user
- * @param block : left-0, self-1, right-2 (integer)
- * 
- * # status_codes
- * 200: Query Executed Successfully
- * 400: Query failed or table not found
- */
-class QueryResponse {
-    constructor(query_hash, status, message, data, block) {
-        this.query_hash = query_hash;
-        this.status = status;
-        this.message = message;
-        this.data = data;
-        this.block = block;
-    }
-}
-
-
-if(cluster.isMaster) {
-    var ioClient = io.connect("http://localhost:8003", {
-        transportOptions: {
-            polling: {
-                extraHeaders: {
-                    'clientid': node_id,
-                    'password': "pass12345678",
-                }
-            }
-        }
-    });
-}
-
-const { fork } = require('child_process');
-
-
-// default connection is as primary client
-// change to secondary client
-// target the receiver with pre-defined password
-// ioClient.emit("changeClientType", "12345678");
-
-// Log to show client type change
-ioClient.on('clientTypeChange', (msg) => {
-    print_stat();
-    // console.log('Client Type Change to Secondary-Client: ' + msg);
-});
-
 // TODO : priority_queue with priority considering Data Hazrads
 var query_queue = new Array();
 var olap_queue = new Array();
@@ -96,6 +30,56 @@ for (let i = 0; i < 6; i++) {
     query_stat[i] = 0;
     time_spent[i] = 0;
 }
+
+// to store table information
+const table = require('./table.js');
+
+const time = require('./time.js');
+//for child process
+const cluster = require('cluster');
+var pro = require("process");
+
+const node_id = 'node_' + pro.pid;
+console.log("Node Id : " + node_id);
+
+// connect to server on given port
+const io = require("socket.io-client");
+
+
+const QueryResponse = require('./query-response.js');
+
+
+if(cluster.isMaster) {
+    var ioClient = io.connect("http://localhost:8003", {
+        transportOptions: {
+            polling: {
+                extraHeaders: {
+                    'clientid': node_id,
+                    'password': "pass12345678",
+                }
+            }
+        }
+    });
+}
+
+const { fork } = require('child_process');
+
+
+// default connection is as primary client
+// change to secondary client
+// target the receiver with pre-defined password
+// ioClient.emit("changeClientType", "12345678");
+
+// Log to show client type change
+ioClient.on('clientTypeChange', (msg) => {
+    print_stat();
+    // console.log('Client Type Change to Secondary-Client: ' + msg);
+});
+
+ioClient.on('getTablesList', () => {
+    ioClient.emit('tablesList', JSON.stringify(table_record[1]) );
+});
+
 //create 
 function createOperation(query, node) {
     let response = new QueryResponse(query.hash, 400, null, null, node);
@@ -605,9 +589,6 @@ function process(query, node) {
         if (cluster.isMaster) {
             //processing oltp query
             let res = query_processor(query, node);
-            // console.log(query,res);
-            // console.log(query);
-            // console.log(res);
             ioClient.emit('processed', JSON.stringify(res));
         }
     }

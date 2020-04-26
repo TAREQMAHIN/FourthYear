@@ -6,6 +6,10 @@ const crypto = require('crypto');
 const io = require("socket.io")();
 
 
+const QueryResponse = require('./query-response.js');
+
+var tables = new Map();
+
 /***
  * Secondary Clients 
  * 
@@ -62,10 +66,8 @@ function startServer(port) {
         let password = socket.handshake.headers['password'];
         if (password == "pass12345678") {
             sClientList.set(socket.handshake.headers['clientid'], socket);
-
             // add the new to consistent hash ring
             sClientAvailable.addNode(socket.handshake.headers['clientid']);
-
         }
         else {
             pClientList.set(socket.id, socket);
@@ -84,8 +86,17 @@ function startServer(port) {
         // clientid is a valid key in consistent hash ring for a node, and undefined for user
         let clientid = socket.handshake.headers['clientid'];
 
+        socket.emit('getTablesList');
+
+        socket.on('tablesList', (tableInfo) => {
+            let tablesList = JSON.parse(tableInfo);
+            for (const key in tablesList) {
+                tables.set(tablesList[key].name,1);
+            }
+        });
+
         // console.log('New connection from ' + socket.request.connection.remoteAddress);
-        console.info(`Client connected [id=${socket.id}]`);
+        console.log(`Client connected [id=${socket.id}]`);
         console.log('No of Users : ' + pClientList.size);
         console.log('No of Nodes : ' + sClientList.size);
 
@@ -97,25 +108,18 @@ function startServer(port) {
             console.log("Synchronization of data(add) started at: " + Date.now());
             // left : clientid of left node according to consistent hash ring
             // right : clientid of right node according to consistent hash ring
-            if (sClientList.size > 1) {
-                let left = sClientList.get(sClientAvailable.getLeftNode(clientid)).handshake.headers['clientid'];
-                let right = sClientList.get(sClientAvailable.getRightNode(clientid)).handshake.headers['clientid'];
+            let left = sClientList.get(sClientAvailable.getLeftNode(clientid)).handshake.headers['clientid'];
+            let right = sClientList.get(sClientAvailable.getRightNode(clientid)).handshake.headers['clientid'];
 
-                if (left != clientid) {
-                    sClientList.get(left).emit('updateNeighbour', JSON.stringify({
-                        socketId: right,
-                        direction: 'right', cause: 'addition'
-                    }));
-                }
+            sClientList.get(left).emit('updateNeighbour', JSON.stringify({
+                socketId: right,
+                direction: 'right', cause: 'addition'
+            }));
 
-                if (right != clientid && right != left) {
-                    sClientList.get(right).emit('updateNeighbour', JSON.stringify({
-                        socketId: left,
-                        direction: 'left', cause: 'addition'
-                    }));
-                }
-            }
-
+            sClientList.get(right).emit('updateNeighbour', JSON.stringify({
+                socketId: left,
+                direction: 'left', cause: 'addition'
+            }));
             console.log("Synchronization of data(add) finished at: " + Date.now());
 
         }
@@ -127,15 +131,13 @@ function startServer(port) {
             let left = sClientList.get(sClientAvailable.getLeftNode(clientid)).handshake.headers['clientid'];
             let right = sClientList.get(sClientAvailable.getRightNode(clientid)).handshake.headers['clientid'];
 
-            if (left != clientid) {
-                socket.emit('updateNeighbour', JSON.stringify({ socketId: left, direction: 'left', cause: 'addition', new: 'true' }));
-                sClientList.get(left).emit('updateNeighbour', JSON.stringify({ socketId: clientid, direction: 'right', cause: 'addition' }));
-            }
+            socket.emit('updateNeighbour', JSON.stringify({ socketId: left, direction: 'left', cause: 'addition', new: 'true' }));
+            sClientList.get(left).emit('updateNeighbour', JSON.stringify({ socketId: clientid, direction: 'right', cause: 'addition' }));
+            
 
-            if (right != clientid) {
-                socket.emit('updateNeighbour', JSON.stringify({ socketId: right, direction: 'right', cause: 'addition', new: 'true' }));
-                sClientList.get(right).emit('updateNeighbour', JSON.stringify({ socketId: clientid, direction: 'left', cause: 'addition' }));
-            }
+            socket.emit('updateNeighbour', JSON.stringify({ socketId: right, direction: 'right', cause: 'addition', new: 'true' }));
+            sClientList.get(right).emit('updateNeighbour', JSON.stringify({ socketId: clientid, direction: 'left', cause: 'addition' }));
+            
         })
 
         socket.on("itemsList", (p) => {
@@ -168,9 +170,7 @@ function startServer(port) {
         socket.on('passMyItems', (p) => {
             let params = JSON.parse(p);
             console.log(`passMyItems: source: ${clientid}, dest: ${params.dest}`);
-            console.log(sClientAvailable.nodes);
             let destSocket = sClientList.get(params.dest);
-            console.log(params.dest + " : dest");
             destSocket.emit('addMyItems', JSON.stringify({
                 source: clientid,
                 tableInfo: params.tableInfo,
@@ -186,8 +186,22 @@ function startServer(port) {
          * return the received result to primary client
          */
         socket.on("query", (query) => {
+            console.log(tables);
             // console.log('Incoming query : '+ query.hash);
             // console.log('Received from user : '+socket.request.connection.remoteAddress);
+
+            // add table to bloom filter and continue to process
+            if(query.operation == 'C') {
+                tables.set(query.table_name, 1);
+            }
+            else {
+                // if table doesn't exist, send response to client without processing
+                if(tables.get(query.table_name) === undefined) {
+                    let response = new QueryResponse(query.hash, 200, "Table doesn't exist", null, null);
+                    socket.emit('result', response);
+                    return;
+                }
+            }
 
             let secondaryClient = sClientAvailable.getNode(query.table_name);
 
@@ -199,13 +213,7 @@ function startServer(port) {
             temp_query.set('query', query);
 
             pendingQuery.set(query.hash, temp_query);
-            try {
-                sClientList.get(secondaryClient).emit('process', query, 1);
-            } catch (error) {
-                console.log("secodaryClient : "+secondaryClient)
-                console.log(sClientAvailable.nodes);
-                console.log(sClientList.keys());
-            }
+            sClientList.get(secondaryClient).emit('process', query, 1);
         });
 
         /***
@@ -219,10 +227,6 @@ function startServer(port) {
             let response = JSON.parse(result);
 
             let queryid = pendingQuery.get(response.query_hash);
-            console.log(queryid);
-            console.log(response);
-            console.log(sClientAvailable.nodes);
-            console.log('');
             if (queryid !== undefined) {
                 // failed or table not found
                 if (response.status == 400) {
@@ -234,16 +238,11 @@ function startServer(port) {
                             pClientList.get(queryid.get('user')).emit("result", result);
                             pendingQuery.delete(response.query_hash);
                         }
+
                         // update last attempted node and probe
-                        try {
-                            pendingQuery.get(response.query_hash).set('last',next_probe_node);
-                            sClientList.get(next_probe_node).emit('process', queryid.get('query'), 1);
-                        } catch (error) {
-                            console.log('next probe node :'+next_probe_node);
-                            console.log(sClientAvailable.nodes);
-                            console.log(sClientList.keys());
-                            console.log(error);
-                        }
+                        pendingQuery.get(response.query_hash).set('last',next_probe_node);
+                        sClientList.get(next_probe_node).emit('process', queryid.get('query'), 1);
+                        
                     }
                 }
                 
@@ -256,11 +255,9 @@ function startServer(port) {
 
                         let tquery = queryid.get('query');
                         let left_node = sClientAvailable.getLeftNode(clientid);
-                        if (left_node != clientid)
                         sClientList.get(left_node).emit('process', tquery, 2);
 
                         let right_node = sClientAvailable.getRightNode(clientid);
-                        if (right_node != clientid && right_node != left_node)
                         sClientList.get(right_node).emit('process', tquery, 0);                    
                     }
                 }
@@ -273,18 +270,15 @@ function startServer(port) {
                 pClientList.delete(socket.id);
             }
             else if (sClientList.get(clientid)) {
-                if (sClientList.size > 1) {
+                console.log("Synchronization of data(remove) started at: " + Date.now());
 
-                    console.log("Synchronization of data(remove) started at: " + Date.now());
+                let left = sClientAvailable.getLeftNode(clientid);
+                let right = sClientAvailable.getRightNode(clientid);
 
-                    let left = sClientAvailable.getLeftNode(clientid);
-                    let right = sClientAvailable.getRightNode(clientid);
+                sClientList.get(left).emit('updateNeighbour', JSON.stringify({ socketId: right, direction: 'right', cause: 'removal' }));
+                sClientList.get(right).emit('updateNeighbour', JSON.stringify({ socketId: left, direction: 'left', cause: 'removal' }));
 
-                    sClientList.get(left).emit('updateNeighbour', JSON.stringify({ socketId: right, direction: 'right', cause: 'removal' }));
-                    if (left != right) sClientList.get(right).emit('updateNeighbour', JSON.stringify({ socketId: left, direction: 'left', cause: 'removal' }));
-
-                    console.log("Synchronization of data(remove) finished at: " + Date.now());
-                }
+                console.log("Synchronization of data(remove) finished at: " + Date.now());
 
                 sClientList.delete(clientid);
                 sClientAvailable.removeNode(clientid);
